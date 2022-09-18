@@ -1,0 +1,76 @@
+/*
+ * Copyright 1999-2018 Alibaba Group Holding Ltd.
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package nacos
+
+import (
+	"fmt"
+	"github.com/coredns/caddy"
+	"github.com/coredns/coredns/core/dnsserver"
+	"github.com/coredns/coredns/plugin"
+	"strings"
+)
+
+func init() {
+	caddy.RegisterPlugin("nacos", caddy.Plugin{
+		ServerType: "dns",
+		Action:     setup,
+	})
+	fmt.Println("register nacos plugin")
+}
+
+func setup(c *caddy.Controller) error {
+	fmt.Println("setup nacos plugin")
+	dnsserver.GetConfig(c).AddPlugin(func(next plugin.Handler) plugin.Handler {
+		vs, _ := NacosParse(c)
+		vs.Next = next
+		Inited = true
+		return vs
+	})
+	return nil
+}
+
+func NacosParse(c *caddy.Controller) (*Nacos, error) {
+	fmt.Println("init nacos plugin...")
+	nacosImpl := Nacos{}
+	var serverHosts = make([]string, 0)
+	namespaceId := ""
+	for c.Next() {
+		nacosImpl.Zones = c.RemainingArgs()
+
+		if c.NextBlock() {
+			for {
+				switch v := c.Val(); v {
+				case "nacos_namespaceId":
+					namespaceId = c.RemainingArgs()[0]
+				case "nacos_server_host":
+					serverHosts = strings.Split(c.RemainingArgs()[0], ",")
+				default:
+					if c.Val() != "}" {
+						return &Nacos{}, c.Errf("unknown property '%s'", c.Val())
+					}
+				}
+
+				if !c.Next() {
+					break
+				}
+			}
+
+		}
+
+		GrpcClient, _ = NewNacosGrpcClient(namespaceId, serverHosts)
+
+		return &nacosImpl, nil
+	}
+	return &Nacos{}, nil
+}
